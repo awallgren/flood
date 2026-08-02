@@ -1,0 +1,37 @@
+# Local cross-build variant of the main Dockerfile for building linux/amd64
+# images on Apple Silicon. esbuild's Go runtime crashes under amd64 emulation
+# (lfstack.push panic), so `npm run build` must be run natively on the host
+# first; this image copies the pre-built dist/ and only installs dependencies
+# under emulation.
+#
+# Usage:
+#   pnpm run build
+#   docker build --platform linux/amd64 -f Dockerfile.local -t <tag> .
+
+ARG NODE_IMAGE=docker.io/node:24.18.1-alpine
+
+FROM ${NODE_IMAGE} AS flood
+
+WORKDIR /usr/src/app/
+
+# Copy project files, including host-built dist/ (see Dockerfile.local.dockerignore)
+COPY . ./
+
+RUN npm i -g corepack && corepack enable && corepack install
+
+# Fetch dependencies from npm (native modules resolve for the target platform)
+RUN pnpm install --frozen-lockfile
+
+# Install runtime dependencies
+RUN apk --no-cache add \
+    mediainfo
+
+# Create "download" user
+RUN adduser -h /home/download -s /sbin/nologin --disabled-password download
+
+# Run as "download" user
+USER download
+
+EXPOSE 3000
+
+ENTRYPOINT ["npm", "--prefix=/usr/src/app/", "run", "start", "--", "--host=::"]
