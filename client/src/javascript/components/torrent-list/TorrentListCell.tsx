@@ -1,5 +1,5 @@
 import classnames from 'classnames';
-import {computed} from 'mobx';
+import {computed, observable, runInAction} from 'mobx';
 import {FC, JSX} from 'react';
 import {observer} from 'mobx-react-lite';
 import {Trans, useLingui} from '@lingui/react';
@@ -27,7 +27,7 @@ import {
 import Duration from '@client/components/general/Duration';
 import ProgressBar from '@client/components/general/ProgressBar';
 import Size from '@client/components/general/Size';
-import {formatDate, formatNumber} from '@client/util/format';
+import {formatDate, formatNumber, formatRelativeDate} from '@client/util/format';
 import {torrentStatusEffective} from '@client/util/torrentStatus';
 import SettingStore from '@client/stores/SettingStore';
 import TorrentStore from '@client/stores/TorrentStore';
@@ -74,6 +74,29 @@ const DateCell: FC<{date: number}> = observer(({date}: {date: number}) => {
   }
 
   return <span>{formatDate(i18n.locale, new Date(date * 1000))}</span>;
+});
+
+// Ticks every minute so relative timestamps re-render even when the
+// underlying torrent data does not change.
+const relativeNow = observable.box(Date.now());
+setInterval(() => runInAction(() => relativeNow.set(Date.now())), 60 * 1000);
+
+const RelativeDateCell: FC<{date: number}> = observer(({date}: {date: number}) => {
+  const {i18n} = useLingui();
+
+  if (date === 0) {
+    return null;
+  }
+
+  if (date === -1) {
+    return <span>{i18n._('torrents.details.general.date.active.now')}</span>;
+  }
+
+  return (
+    <span title={formatDate(i18n.locale, new Date(date * 1000))}>
+      {formatRelativeDate(i18n.locale, date * 1000, relativeNow.get())}
+    </span>
+  );
 });
 
 const ETACell: FC<{eta: number}> = observer(({eta}: {eta: number}) => (eta ? <Duration value={eta} /> : null));
@@ -128,7 +151,7 @@ const DefaultTorrentListCellContent: FC<TorrentListCellContentProps> = observer(
   ({torrent, column}: TorrentListCellContentProps) => {
     switch (column) {
       case 'dateActive':
-        return <DateCell date={torrent[column]} />;
+        return <RelativeDateCell date={torrent[column]} />;
       case 'dateAdded':
         return <DateCell date={torrent[column]} />;
       case 'dateCreated':
