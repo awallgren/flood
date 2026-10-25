@@ -53,6 +53,12 @@ class QBittorrentClientGatewayService extends BaseClientGatewayService implement
     Pick<TorrentProperties, 'comment' | 'dateCreated' | 'isPrivate' | 'trackerURIs'> & {
       trackerMessage: string;
       trackerMessageFetchedAt: number;
+      // An announce was in flight at the last fetch, so its reply is still to come.
+      trackerUpdating: boolean;
+      // Seconds to the next announce at the previous poll. It goes up after every
+      // announce, which is when the tracker message can change, and also when
+      // libtorrent skips an announce on an unreachable local endpoint.
+      reannounce?: number;
     }
   > = {};
 
@@ -81,6 +87,7 @@ class QBittorrentClientGatewayService extends BaseClientGatewayService implement
     }
 
     const realTrackers = trackers.filter((t) => t.tier >= 0);
+    const trackerUpdating = realTrackers.some((t) => t.status === QBittorrentTorrentTrackerStatus.UPDATING);
 
     if (includeProperties) {
       this.cachedProperties[hash] = {
@@ -90,11 +97,13 @@ class QBittorrentClientGatewayService extends BaseClientGatewayService implement
         trackerMessage: realTrackers.find((t) => t.msg.length > 0)?.msg ?? '',
         trackerURIs: getDomainsFromURLs(realTrackers.map((tracker) => tracker.url)),
         trackerMessageFetchedAt: Date.now(),
+        trackerUpdating,
       };
     } else {
       this.cachedProperties[hash].trackerMessage = realTrackers.find((t) => t.msg.length > 0)?.msg ?? '';
       this.cachedProperties[hash].trackerURIs = getDomainsFromURLs(realTrackers.map((tracker) => tracker.url));
       this.cachedProperties[hash].trackerMessageFetchedAt = Date.now();
+      this.cachedProperties[hash].trackerUpdating = trackerUpdating;
     }
   }
 
@@ -408,11 +417,19 @@ class QBittorrentClientGatewayService extends BaseClientGatewayService implement
         // qBittorrent can not handle requests in a highly concurrent way.
         const TRACKER_MESSAGE_TTL = 60 * 60 * 1000; // 1 hour
 
-        for (const {hash} of infos) {
-          if (this.cachedProperties[hash] == null) {
+        for (const {hash, reannounce} of infos) {
+          const cached = this.cachedProperties[hash];
+          if (cached == null) {
             await this.fetchProperties(hash, true);
-          } else if (Date.now() - this.cachedProperties[hash].trackerMessageFetchedAt > TRACKER_MESSAGE_TTL) {
+          } else if (
+            cached.trackerUpdating ||
+            (reannounce != null && cached.reannounce != null && reannounce > cached.reannounce) ||
+            Date.now() - cached.trackerMessageFetchedAt > TRACKER_MESSAGE_TTL
+          ) {
             await this.fetchProperties(hash, false);
+          }
+          if (this.cachedProperties[hash] != null) {
+            this.cachedProperties[hash].reannounce = reannounce;
           }
         }
 

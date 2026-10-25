@@ -99,6 +99,8 @@ export interface QBittorrentTorrentInfo {
   time_active: number;
   // Total size (bytes) of all file in this torrent (including unselected ones)
   total_size: number;
+  // Time until the next tracker announce (seconds). Missing on older qBittorrent versions.
+  reannounce?: number;
   // The first tracker with working status. Returns empty string if no tracker is working.
   tracker: string;
   // Torrent upload speed limit (bytes/s). -1 if unlimited.
